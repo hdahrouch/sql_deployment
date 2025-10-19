@@ -11,6 +11,7 @@ import os
 import json
 import logging
 import time
+import re
 import boto3
 from botocore.exceptions import ClientError
 
@@ -21,6 +22,7 @@ logger.setLevel(logging.INFO)
 # Initialize AWS clients
 s3_client = boto3.client('s3')
 athena_client = boto3.client('athena')
+glue_client = boto3.client('glue')
 
 
 def list_sql_files(bucket_name, prefix='sql_queries/'):
@@ -81,6 +83,106 @@ def read_sql_file(bucket_name, key):
     except ClientError as e:
         logger.error(f"Error reading SQL file {key}: {e}")
         raise
+
+
+def extract_table_name(sql_query):
+    """
+    Extract table name from a CREATE TABLE statement.
+    
+    Args:
+        sql_query (str): SQL query containing CREATE TABLE statement
+        
+    Returns:
+        str: Table name if found, None otherwise
+    """
+    try:
+        # Remove comments
+        sql_clean = re.sub(r'--.*?$', '', sql_query, flags=re.MULTILINE)
+        sql_clean = re.sub(r'/\*.*?\*/', '', sql_clean, flags=re.DOTALL)
+        
+        # Pattern to match CREATE TABLE or CREATE EXTERNAL TABLE
+        # Handles optional IF NOT EXISTS and both quoted and unquoted table names
+        pattern = r'CREATE\s+(?:EXTERNAL\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`"]?(\w+)[`"]?'
+        match = re.search(pattern, sql_clean, re.IGNORECASE | re.DOTALL)
+        
+        if match:
+            table_name = match.group(1)
+            logger.info(f"Extracted table name: {table_name}")
+            return table_name
+        else:
+            logger.warning("Could not extract table name from SQL query")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error extracting table name: {e}")
+        return None
+
+
+def check_table_exists(database, table_name):
+    """
+    Check if a table exists in AWS Glue Data Catalog.
+    
+    Args:
+        database (str): Glue database name
+        table_name (str): Table name to check
+        
+    Returns:
+        bool: True if table exists, False otherwise
+    """
+    try:
+        glue_client.get_table(DatabaseName=database, Name=table_name)
+        logger.info(f"Table {database}.{table_name} exists")
+        return True
+    except glue_client.exceptions.EntityNotFoundException:
+        logger.info(f"Table {database}.{table_name} does not exist")
+        return False
+    except ClientError as e:
+        logger.error(f"Error checking if table exists: {e}")
+        raise
+
+
+def drop_table(table_name, database, output_location):
+    """
+    Drop a table using Athena DDL (does not delete S3 data).
+    
+    Args:
+        table_name (str): Name of the table to drop
+        database (str): Athena database name
+        output_location (str): S3 location for query results
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        logger.info(f"Dropping table {database}.{table_name}")
+        
+        # Use DROP TABLE statement (does not delete S3 data for EXTERNAL tables)
+        drop_query = f"DROP TABLE IF EXISTS {table_name}"
+        
+        # Execute the DROP TABLE query
+        response = athena_client.start_query_execution(
+            QueryString=drop_query,
+            QueryExecutionContext={'Database': database},
+            ResultConfiguration={'OutputLocation': output_location}
+        )
+        
+        query_execution_id = response['QueryExecutionId']
+        logger.info(f"Drop table query started with ID: {query_execution_id}")
+        
+        # Wait for query to complete
+        status = wait_for_query_completion(query_execution_id)
+        
+        if status == 'SUCCEEDED':
+            logger.info(f"Successfully dropped table {database}.{table_name}")
+            return True
+        else:
+            logger.error(f"Failed to drop table {database}.{table_name}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error dropping table {database}.{table_name}: {e}")
+        # Don't raise the exception - we want to continue even if drop fails
+        return False
 
 
 def execute_athena_query(query, database, output_location):
@@ -227,6 +329,15 @@ def lambda_handler(event, context):
                 # Read SQL content
                 sql_query = read_sql_file(sql_bucket, sql_file)
                 
+                # Check if this is a CREATE TABLE statement
+                table_name = extract_table_name(sql_query)
+                
+                if table_name:
+                    # Check if table exists and drop it if it does
+                    if check_table_exists(athena_database, table_name):
+                        logger.info(f"Table {table_name} exists, dropping it before creation")
+                        drop_table(table_name, athena_database, athena_output_location)
+                
                 # Execute query in Athena
                 execution_result = execute_athena_query(
                     sql_query,
@@ -238,7 +349,8 @@ def lambda_handler(event, context):
                     'file': sql_file,
                     'status': 'success',
                     'execution_id': execution_result['execution_id'],
-                    'query_status': execution_result['status']
+                    'query_status': execution_result['status'],
+                    'table_name': table_name
                 })
                 
                 logger.info(f"Successfully processed {sql_file}")

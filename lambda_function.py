@@ -19,10 +19,34 @@ from botocore.exceptions import ClientError
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Initialize AWS clients
-s3_client = boto3.client('s3')
-athena_client = boto3.client('athena')
-glue_client = boto3.client('glue')
+# Initialize AWS clients lazily
+_s3_client = None
+_athena_client = None
+_glue_client = None
+
+
+def get_s3_client():
+    """Get or create S3 client."""
+    global _s3_client
+    if _s3_client is None:
+        _s3_client = boto3.client('s3')
+    return _s3_client
+
+
+def get_athena_client():
+    """Get or create Athena client."""
+    global _athena_client
+    if _athena_client is None:
+        _athena_client = boto3.client('athena')
+    return _athena_client
+
+
+def get_glue_client():
+    """Get or create Glue client."""
+    global _glue_client
+    if _glue_client is None:
+        _glue_client = boto3.client('glue')
+    return _glue_client
 
 
 def list_sql_files(bucket_name, prefix='sql_queries/'):
@@ -41,6 +65,7 @@ def list_sql_files(bucket_name, prefix='sql_queries/'):
     try:
         logger.info(f"Listing SQL files from s3://{bucket_name}/{prefix}")
         
+        s3_client = get_s3_client()
         paginator = s3_client.get_paginator('list_objects_v2')
         pages = paginator.paginate(Bucket=bucket_name, Prefix=prefix)
         
@@ -77,6 +102,7 @@ def read_sql_file(bucket_name, key):
     """
     try:
         logger.info(f"Reading SQL file: s3://{bucket_name}/{key}")
+        s3_client = get_s3_client()
         response = s3_client.get_object(Bucket=bucket_name, Key=key)
         sql_content = response['Body'].read().decode('utf-8')
         return sql_content
@@ -130,6 +156,7 @@ def check_table_exists(database, table_name):
         bool: True if table exists, False otherwise
     """
     try:
+        glue_client = get_glue_client()
         glue_client.get_table(DatabaseName=database, Name=table_name)
         logger.info(f"Table {database}.{table_name} exists")
         return True
@@ -160,6 +187,7 @@ def drop_table(table_name, database, output_location):
         drop_query = f"DROP TABLE IF EXISTS {table_name}"
         
         # Execute the DROP TABLE query
+        athena_client = get_athena_client()
         response = athena_client.start_query_execution(
             QueryString=drop_query,
             QueryExecutionContext={'Database': database},
@@ -202,6 +230,7 @@ def execute_athena_query(query, database, output_location):
         logger.info(f"Query: {query[:100]}...")  # Log first 100 chars
         
         # Start query execution
+        athena_client = get_athena_client()
         response = athena_client.start_query_execution(
             QueryString=query,
             QueryExecutionContext={'Database': database},
@@ -243,6 +272,7 @@ def wait_for_query_completion(query_execution_id, max_attempts=60, delay=2):
     
     while attempts < max_attempts:
         try:
+            athena_client = get_athena_client()
             response = athena_client.get_query_execution(
                 QueryExecutionId=query_execution_id
             )

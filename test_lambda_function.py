@@ -7,7 +7,7 @@ These tests use moto to mock AWS services for local testing.
 import os
 import json
 import pytest
-from moto import mock_s3, mock_athena
+from moto import mock_aws
 import boto3
 from botocore.exceptions import ClientError
 
@@ -37,7 +37,7 @@ def mock_env_vars():
 @pytest.fixture
 def s3_setup(aws_credentials):
     """Set up S3 mock with test data."""
-    with mock_s3():
+    with mock_aws():
         s3 = boto3.client('s3', region_name='us-east-1')
         
         # Create test bucket
@@ -92,6 +92,46 @@ def test_read_sql_file_not_found(s3_setup):
             'test-sql-bucket',
             'sql_queries/nonexistent.sql'
         )
+
+
+def test_extract_table_name_basic():
+    """Test extracting table name from basic CREATE TABLE statement."""
+    sql = "CREATE TABLE users (id INT, name STRING);"
+    table_name = lambda_function.extract_table_name(sql)
+    assert table_name == "users"
+
+
+def test_extract_table_name_external():
+    """Test extracting table name from CREATE EXTERNAL TABLE statement."""
+    sql = "CREATE EXTERNAL TABLE IF NOT EXISTS orders (id INT);"
+    table_name = lambda_function.extract_table_name(sql)
+    assert table_name == "orders"
+
+
+def test_extract_table_name_with_comments():
+    """Test extracting table name from SQL with comments."""
+    sql = """
+    -- This is a comment
+    /* Multi-line
+       comment */
+    CREATE TABLE products (id INT, name STRING);
+    """
+    table_name = lambda_function.extract_table_name(sql)
+    assert table_name == "products"
+
+
+def test_extract_table_name_with_backticks():
+    """Test extracting table name with backticks."""
+    sql = "CREATE TABLE `my_table` (id INT);"
+    table_name = lambda_function.extract_table_name(sql)
+    assert table_name == "my_table"
+
+
+def test_extract_table_name_not_create():
+    """Test extracting table name from non-CREATE statement."""
+    sql = "SELECT * FROM users;"
+    table_name = lambda_function.extract_table_name(sql)
+    assert table_name is None
 
 
 def test_lambda_handler_missing_env_vars():

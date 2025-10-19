@@ -2,6 +2,51 @@
 
 All notable changes to the SQL Deployment Lambda project are documented here.
 
+## [1.1.0] - 2025-10-19
+
+### Added - Table Management Feature
+
+#### Core Functionality
+- **Automatic Table Drop Before Creation**: Lambda now checks if a table exists before creating it and drops it if found
+- **S3 Data Preservation**: DROP TABLE only removes metadata from Glue catalog, S3 data files remain untouched
+- **Smart Table Name Extraction**: Regex-based extraction of table names from CREATE TABLE statements
+- **Glue Catalog Integration**: Direct checks for table existence using AWS Glue API
+
+#### New Functions
+- `extract_table_name()` - Extracts table name from CREATE TABLE SQL statements
+- `check_table_exists()` - Checks if a table exists in AWS Glue Data Catalog
+- `drop_table()` - Drops an existing table using Athena DDL (preserves S3 data)
+- Client getter functions for lazy initialization of AWS clients
+
+#### Features
+- Handles various CREATE TABLE syntax patterns:
+  - `CREATE TABLE tablename`
+  - `CREATE EXTERNAL TABLE tablename`
+  - `CREATE TABLE IF NOT EXISTS tablename`
+  - Tables with backticks or quotes
+  - SQL with comments (single-line and multi-line)
+- Non-breaking change: If table doesn't exist, proceeds directly to creation
+- Detailed logging of table management operations
+
+#### Testing
+- Updated tests to use `mock_aws` (moto v4+)
+- Added comprehensive tests for table name extraction
+- All 11 unit tests passing
+- Manual verification completed
+
+#### Technical Improvements
+- Lazy initialization of AWS clients to support better testing
+- Improved code modularity and testability
+- Added regex import for pattern matching
+
+### Changed
+- Lambda function now performs additional Glue catalog check before table creation
+- Response body now includes `table_name` field in results
+
+### Fixed
+- Compatibility with moto v4+ testing library
+- Import issues during test collection
+
 ## [1.0.0] - 2025-10-19
 
 ### Added - Initial Release

@@ -6,15 +6,30 @@ This project contains an AWS Lambda function that automatically lists SQL query 
 
 - **Automatic SQL File Discovery**: Lists all `.sql` files from a specified S3 bucket and prefix
 - **Sequential Execution**: Executes SQL queries one by one in alphabetical order
+- **Intelligent Table Management**: Automatically drops existing tables before recreation (preserves S3 data)
 - **Athena Integration**: Runs queries directly in AWS Athena
+- **Glue Catalog Integration**: Checks for table existence using AWS Glue Data Catalog
 - **Error Handling**: Continues execution even if individual queries fail
 - **Detailed Logging**: Comprehensive logging for monitoring and debugging
 - **Status Reporting**: Returns detailed results for each executed query
 
+## How It Works
+
+When processing CREATE TABLE statements, the Lambda function:
+
+1. **Extracts the table name** from the CREATE TABLE SQL statement
+2. **Checks if the table exists** in the AWS Glue Data Catalog
+3. **Drops the existing table** if found (metadata only - S3 data files are preserved)
+4. **Creates the new table** by executing the SQL statement
+
+This ensures that tables are always recreated with the latest schema definition without losing your S3 data files.
+
 ## Architecture
 
 ```
-S3 Bucket (SQL Files) → Lambda Function → AWS Athena → Tables Created
+S3 Bucket (SQL Files) → Lambda Function → Check Table Exists → Drop if Exists → AWS Athena → Tables Created
+                                              ↓
+                                      AWS Glue Catalog
 ```
 
 ## Prerequisites

@@ -14,8 +14,7 @@ import logging
 import boto3
 from botocore.exceptions import ClientError
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Get logger for this module (application should configure logging)
 logger = logging.getLogger(__name__)
 
 
@@ -88,15 +87,16 @@ class GlueTableManager:
         """
         Delete a table if it exists in the Glue database.
         
+        This method calls delete_table directly, which handles EntityNotFoundException
+        gracefully, avoiding an extra API call to check existence.
+        
         Args:
             table_name (str): The name of the table to delete
             
         Returns:
             bool: True if the table was deleted, False if it didn't exist
         """
-        if self.table_exists(table_name):
-            return self.delete_table(table_name)
-        return False
+        return self.delete_table(table_name)
     
     def create_table(self, table_name, table_input):
         """
@@ -127,6 +127,9 @@ class GlueTableManager:
         This is the main method that implements the requirement:
         "if table exists in Glue, the table must be deleted before creating it again"
         
+        This method calls delete_table directly without checking existence first,
+        as delete_table handles EntityNotFoundException gracefully, reducing API calls.
+        
         Args:
             table_name (str): The name of the table to recreate
             table_input (dict): The table definition including columns, storage descriptor, etc.
@@ -134,10 +137,10 @@ class GlueTableManager:
         Returns:
             dict: The response from the create_table API call
         """
-        # Delete the table if it exists
-        if self.table_exists(table_name):
-            logger.info(f"Table '{table_name}' exists. Deleting before recreation...")
-            self.delete_table(table_name)
+        # Delete the table if it exists (handles EntityNotFoundException gracefully)
+        was_deleted = self.delete_table(table_name)
+        if was_deleted:
+            logger.info(f"Table '{table_name}' existed and was deleted before recreation")
         
         # Create the table
         logger.info(f"Creating table '{table_name}'...")

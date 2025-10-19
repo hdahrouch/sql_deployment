@@ -96,25 +96,22 @@ class TestGlueTableManager(unittest.TestCase):
     
     def test_delete_table_if_exists_deletes_when_table_exists(self):
         """Test that delete_table_if_exists deletes when table exists."""
-        self.mock_glue.get_table.return_value = {'Table': {'Name': self.table_name}}
         self.mock_glue.delete_table.return_value = {}
         
         result = self.manager.delete_table_if_exists(self.table_name)
         
         self.assertTrue(result)
-        self.mock_glue.get_table.assert_called_once()
         self.mock_glue.delete_table.assert_called_once()
     
     def test_delete_table_if_exists_returns_false_when_table_doesnt_exist(self):
         """Test that delete_table_if_exists returns False when table doesn't exist."""
         error_response = {'Error': {'Code': 'EntityNotFoundException'}}
-        self.mock_glue.get_table.side_effect = ClientError(error_response, 'get_table')
+        self.mock_glue.delete_table.side_effect = ClientError(error_response, 'delete_table')
         
         result = self.manager.delete_table_if_exists(self.table_name)
         
         self.assertFalse(result)
-        self.mock_glue.get_table.assert_called_once()
-        self.mock_glue.delete_table.assert_not_called()
+        self.mock_glue.delete_table.assert_called_once()
     
     def test_create_table_success(self):
         """Test that create_table successfully creates a table."""
@@ -152,15 +149,13 @@ class TestGlueTableManager(unittest.TestCase):
                 'Columns': [{'Name': 'id', 'Type': 'int'}]
             }
         }
-        # Table exists
-        self.mock_glue.get_table.return_value = {'Table': {'Name': self.table_name}}
+        # Table exists - delete_table succeeds
         self.mock_glue.delete_table.return_value = {}
         self.mock_glue.create_table.return_value = {'TableMetadata': {}}
         
         result = self.manager.recreate_table(self.table_name, table_input)
         
-        # Verify the order: get_table (check exists), delete_table, create_table
-        self.mock_glue.get_table.assert_called_once()
+        # Verify delete_table and create_table are called
         self.mock_glue.delete_table.assert_called_once()
         self.mock_glue.create_table.assert_called_once()
         
@@ -178,16 +173,15 @@ class TestGlueTableManager(unittest.TestCase):
                 'Columns': [{'Name': 'id', 'Type': 'int'}]
             }
         }
-        # Table doesn't exist
+        # Table doesn't exist - delete_table returns False
         error_response = {'Error': {'Code': 'EntityNotFoundException'}}
-        self.mock_glue.get_table.side_effect = ClientError(error_response, 'get_table')
+        self.mock_glue.delete_table.side_effect = ClientError(error_response, 'delete_table')
         self.mock_glue.create_table.return_value = {'TableMetadata': {}}
         
         result = self.manager.recreate_table(self.table_name, table_input)
         
-        # Verify the order: get_table (check exists), create_table (no delete)
-        self.mock_glue.get_table.assert_called_once()
-        self.mock_glue.delete_table.assert_not_called()
+        # Verify delete_table is called (returns False) and create_table is called
+        self.mock_glue.delete_table.assert_called_once()
         self.mock_glue.create_table.assert_called_once()
 
 
